@@ -272,6 +272,9 @@ def _apply_llm_arbitration(
 
 def _get_llm_enabled_agents(state: HedgeFundState) -> list[str]:
     """Agents allowed to call LLM — from deploy JSON, else weighted desks in state."""
+    requested = state.get("llm_enabled_agents")
+    if isinstance(requested, list):
+        return [str(name) for name in requested if str(name).strip()]
     try:
         from config.deploy_loader import get_llm_enabled_agent_names
 
