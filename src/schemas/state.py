@@ -72,6 +72,9 @@ class HedgeFundState(TypedDict):
     profile_id: NotRequired[str]
     # Arbitrator mode (v4.1): "weighted_convergence" | "agent_llm"
     arbitrator_mode: NotRequired[str]
+    # Optional per-invocation allow-list for LLM desk calls. External scanner
+    # analysis uses this to avoid activating unrelated desks.
+    llm_enabled_agents: NotRequired[List[str]]
 
 
 def initial_hedge_fund_state(
