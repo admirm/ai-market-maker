@@ -5,7 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from external_signals.schema import ExternalAnalysis, ExternalSignal
-from external_signals.service import selected_desks
+from external_signals.service import _analysis_from_state, selected_desks
 from external_signals.store import ExternalSignalStore
 
 
@@ -37,4 +37,12 @@ def test_store_is_idempotent_and_retains_outcome(tmp_path: Path) -> None:
     row = store.get_signal(str(signal.signal_id))
     assert row and row["analysis"]["status"] == "completed"
     assert row["outcomes"]["30m"]["signed_return_pct"] == 0.01
+
+
+def test_empty_workflow_state_fails_closed() -> None:
+    analysis = _analysis_from_state(_signal(), {}, stale=False)
+    assert analysis.status == "failed"
+    assert analysis.deserves_further_consideration is False
+    assert "incomplete_analysis_workflow" in analysis.risks
+
 

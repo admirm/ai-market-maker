@@ -8,6 +8,7 @@ from typing import Any
 from langgraph.graph import END, StateGraph
 
 from .schema import ExternalAnalysis, ExternalSignal
+from schemas.state import HedgeFundState
 
 _DESKS = {
     "breakout": ["pattern_recognition_bot", "technical_ta_engine", "liquidity_order_flow"],
@@ -50,7 +51,10 @@ def _build_analysis_graph(source: str):
 
     desks = selected_desks(source)
     functions = _tier0_node_fns()
-    graph = StateGraph(dict)
+    # HedgeFundState declares append reducers for the parallel desk contracts,
+    # market context, and reasoning logs. A bare dict silently loses those
+    # concurrent updates and produces an empty, misleading "completed" result.
+    graph = StateGraph(HedgeFundState)
     graph.add_node("policy", policy_orchestrator)
     graph.add_node("submitted_ticker_context", _submitted_ticker_context)
     for desk in desks:
@@ -93,6 +97,38 @@ def _analysis_from_state(signal: ExternalSignal, state: dict[str, Any], *, stale
         risks.append("stale_signal")
     risk_extra = ((risk.get("reasoning") or {}).get("extra") if isinstance(risk.get("reasoning"), dict) else {})
     risks.extend(str(x) for x in (risk_extra.get("reasons", []) if isinstance(risk_extra, dict) else []))
+    has_desk_output = any(
+        isinstance(output, dict) and bool(output)
+        for output in agent_outputs.values()
+    )
+    has_arbitration = bool(params)
+    has_risk_guard = bool(risk)
+    if not (has_desk_output and has_arbitration and has_risk_guard):
+        missing = []
+        if not has_desk_output:
+            missing.append("desk_outputs")
+        if not has_arbitration:
+            missing.append("arbitration")
+        if not has_risk_guard:
+            missing.append("risk_guard")
+        return ExternalAnalysis(
+            signal_id=signal.signal_id,
+            status="failed",
+            deserves_further_consideration=False,
+            confidence=0.0,
+            stance="neutral",
+            risks=["incomplete_analysis_workflow", *risks][:8],
+            invalidation_conditions=["Complete desk, arbitration, and Risk Guard output is required"],
+            contributing_components=selected_desks(signal.source) + ["weighted_arbitrator", "risk_guard"],
+            agent_outputs=agent_outputs,
+            risk_decision=risk,
+            human_reasoning=f"Incomplete analysis workflow; missing: {', '.join(missing)}.",
+        )
+    invalidations = []
+    if vetoed:
+        invalidations.append("Risk Guard veto")
+    if stale:
+        invalidations.append("Signal older than configured maximum age")
     return ExternalAnalysis(
         signal_id=signal.signal_id,
         status="completed",
@@ -102,7 +138,7 @@ def _analysis_from_state(signal: ExternalSignal, state: dict[str, Any], *, stale
         supporting_evidence=reasons[:8],
         contradictory_evidence=["risk_guard_veto"] if vetoed else [],
         risks=[x for x in risks if x][:8],
-        invalidation_conditions=["Risk Guard veto", "Signal older than configured maximum age"],
+        invalidation_conditions=invalidations,
         contributing_components=selected_desks(signal.source) + ["weighted_arbitrator", "risk_guard"],
         agent_outputs=agent_outputs,
         risk_decision=risk,
